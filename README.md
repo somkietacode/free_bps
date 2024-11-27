@@ -31,8 +31,8 @@ Before using this system, make sure you have the following installed:
 ### 1. Clone the repository or create a directory for your project:
 
 ```bash
-git clone https://your-repository-url.git
-cd your-project-directory
+git clone https://github.com/somkietacode/free_bps
+cd free_bps
 ```
 
 ### 2. Install the required dependencies:
