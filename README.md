@@ -73,7 +73,7 @@ The application will start running on `http://localhost:8000`.
 - **Response**:  
   - If successful, returns an API key:  
     ```json
-    { "API_KEY": "API_KEY_1" }
+    { "API_KEY": API_KEY }
     ```
   - If authentication fails, returns an error:  
     ```json
