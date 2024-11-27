@@ -55,7 +55,7 @@ Replace `http://your-backend-server.com` with the actual URL of your backend.
 ### 4. Run the FastAPI application:
 
 ```bash
-python your_script_name.py
+python bps.py
 ```
 
 The application will start running on `http://localhost:8000`.
