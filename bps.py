@@ -86,16 +86,23 @@ async def proxy_request(endpoint: str, KEY: str = Query(None), request: Request 
     
     # Forward request to backend without the KEY parameter
     try:
+        # Exclure "KEY" des paramètres avant de les transmettre au backend
+        params = dict(request.query_params)
+        if "KEY" in params:
+            del params["KEY"]
+
         async with httpx.AsyncClient() as client:
             # Forward request headers and body
             backend_response = await client.get(
                 f"{BACKEND_URL}/{endpoint}",
-                params=request.query_params.dict(exclude={"KEY"}),
+                params=params,  # Transmettre les autres paramètres sans "KEY"
                 headers=request.headers
             )
+
         return backend_response.json()
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
+
 
 def track_invalid_requests(ip: str):
     now = datetime.now()
