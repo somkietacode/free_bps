@@ -1,9 +1,10 @@
 import configparser
 import secrets
-from fastapi import FastAPI, Request, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Request, Query
 from datetime import datetime, timedelta
 from typing import Dict
 import httpx
+from contextlib import asynccontextmanager
 
 app = FastAPI()
 
@@ -22,6 +23,23 @@ BACKEND_URL = config.get("backend", "url")
 if not BACKEND_URL:
     raise ValueError("Backend URL not configured in bps.conf")
 
+# Lifespan event handler for startup and shutdown tasks
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Code to run on startup (before the server starts)
+    print("Application is starting...")
+
+    # You can perform startup tasks here (e.g., database connections or cleanup tasks)
+    # For example, load or initialize resources
+
+    yield  # This is where the app will run while the server is alive
+
+    # Code to run on shutdown (after the server stops)
+    print("Application is shutting down...")
+    # Clean up resources here (e.g., closing database connections)
+
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/auth")
 async def auth_proxy(request: Request):
@@ -48,7 +66,6 @@ async def auth_proxy(request: Request):
             return {"error": "Invalid credentials"}
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
-
 
 @app.get("/{endpoint}")
 async def proxy_request(endpoint: str, KEY: str = Query(None), request: Request = None):
@@ -80,7 +97,6 @@ async def proxy_request(endpoint: str, KEY: str = Query(None), request: Request 
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
 
-
 def track_invalid_requests(ip: str):
     now = datetime.now()
     INVALID_REQUESTS.setdefault(ip, []).append(now)
@@ -92,7 +108,6 @@ def track_invalid_requests(ip: str):
         BLOCKED_IPS[ip] = now + timedelta(days=1)
         del INVALID_REQUESTS[ip]
 
-
 # Cleanup expired sessions
 @app.on_event("startup")
 async def cleanup_sessions():
@@ -102,7 +117,6 @@ async def cleanup_sessions():
         for key in expired_keys:
             del SESSION_STORE[key]
         await asyncio.sleep(60)  # Cleanup every 60 seconds
-
 
 if __name__ == "__main__":
     import uvicorn
