@@ -19,6 +19,14 @@ API_KEY_EXPIRATION = timedelta(days=1)
 config = configparser.ConfigParser()
 config.read("bps.conf")
 BACKEND_URL = config.get("backend", "url")
+role_atribute = ''
+try :
+    role_atribute = config.get("user_role", "atribute_name")
+    if role_atribute != '':
+        permissionConfig = configparser.ConfigParser()
+        permissionConfig.read("permission.conf")
+except :
+    pass
 
 if not BACKEND_URL:
     raise ValueError("Backend URL not configured in bps.conf")
@@ -30,8 +38,6 @@ async def lifespan(app: FastAPI):
     print("Application is starting...")
 
     # You can perform startup tasks here (e.g., database connections or cleanup tasks)
-    # For example, load or initialize resources
-
     yield  # This is where the app will run while the server is alive
 
     # Code to run on shutdown (after the server stops)
@@ -51,58 +57,94 @@ async def auth_proxy(request: Request):
     # Forward the request to the backend
     try:
         async with httpx.AsyncClient() as client:
+
             backend_response = await client.post(f"{BACKEND_URL}/auth", content=await request.body())
             backend_response_json = backend_response.json()
+            print(f"{BACKEND_URL}/auth")
 
         # Check backend response
         if backend_response_json.get("success"):
             # Generate a random 16-character API key
             api_key = secrets.token_hex(8)  # Generates a 16-character hexadecimal string
-            SESSION_STORE[api_key] = {
-                "expires_at": datetime.now() + API_KEY_EXPIRATION
-            }
+            if role_atribute != '':
+                SESSION_STORE[api_key] = {
+                    "expires_at": datetime.now() + API_KEY_EXPIRATION,
+                    "role": backend_response_json.get(role_atribute)
+                }
+            else:
+                SESSION_STORE[api_key] = {
+                    "expires_at": datetime.now() + API_KEY_EXPIRATION
+                }
             return {"API_KEY": api_key}
         else:
             return {"error": "Invalid credentials"}
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
 
-@app.get("/{endpoint}")
-async def proxy_request(endpoint: str, KEY: str = Query(None), request: Request = None):
+@app.post("/register")
+async def register_proxy(request: Request):
     ip = request.client.host
     
     if ip in BLOCKED_IPS and datetime.now() < BLOCKED_IPS[ip]:
         raise HTTPException(status_code=403, detail="IP blocked due to repeated invalid requests.")
 
-    # Validate API Key
+    # Forward the request to the backend
+    try:
+        async with httpx.AsyncClient() as client:
+            backend_response = await client.post(f"{BACKEND_URL}/register", content=await request.body())
+            backend_response_json = backend_response.json()
+            return backend_response_json
+
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
+
+@app.get("/{endpoint}")
+async def proxy_request(endpoint: str, KEY: str = Query(None), request: Request = None):
+    ip = request.client.host
+
+    # Vérifier si l'adresse IP est bloquée
+    if ip in BLOCKED_IPS and datetime.now() < BLOCKED_IPS[ip]:
+        raise HTTPException(status_code=403, detail="IP blocked due to repeated invalid requests.")
+
+    # Valider la clé API
     if not KEY:
         track_invalid_requests(ip)
         return {"error": "key not provided"}
-    
+
     session = SESSION_STORE.get(KEY)
     if not session or session["expires_at"] < datetime.now():
         track_invalid_requests(ip)
         return {"error": "Invalid key"}
-    
-    # Forward request to backend without the KEY parameter
-    try:
-        # Exclure "KEY" des paramètres avant de les transmettre au backend
-        params = dict(request.query_params)
-        if "KEY" in params:
-            del params["KEY"]
 
+    # Exclure "KEY" des paramètres avant de les transmettre au backend
+    params = dict(request.query_params)
+    if "KEY" in params:
+        del params["KEY"]
+
+    # Vérification des permissions en fonction des méthodes HTTP
+    try:
+        method = request.method.upper()  # Obtenir la méthode HTTP actuelle (GET, POST, etc.)
+        allowedRoles = permissionConfig.get(endpoint, method)  # Récupérer les rôles autorisés pour cette méthode
+
+        if allowedRoles:  # Si des rôles sont définis pour cette méthode
+            allowedRoles = allowedRoles.split(",")  # Convertir les rôles en liste
+            user_role = session.get("role")
+
+            if user_role not in allowedRoles:  # Vérifier si l'utilisateur est autorisé
+                return {"error": "Not allowed"}
+
+        # Si les permissions sont validées ou non définies, transmettre la requête au backend
         async with httpx.AsyncClient() as client:
-            # Forward request headers and body
-            backend_response = await client.get(
-                f"{BACKEND_URL}/{endpoint}",
-                params=params,  # Transmettre les autres paramètres sans "KEY"
+            backend_response = await client.request(
+                method=method,
+                url=f"{BACKEND_URL}/{endpoint}",
+                params=params,
                 headers=request.headers
             )
-
         return backend_response.json()
+
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Error forwarding to backend: {exc}")
-
 
 def track_invalid_requests(ip: str):
     now = datetime.now()
